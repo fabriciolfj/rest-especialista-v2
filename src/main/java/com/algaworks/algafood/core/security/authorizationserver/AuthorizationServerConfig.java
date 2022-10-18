@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
+import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.User;
@@ -23,9 +24,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2TokenFormat;
-import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
-import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.*;
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
@@ -34,6 +35,7 @@ import org.springframework.security.oauth2.server.authorization.config.TokenSett
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 import java.io.InputStream;
 import java.security.KeyStore;
@@ -48,8 +50,19 @@ public class AuthorizationServerConfig {
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     public SecurityFilterChain authFilterChain(HttpSecurity http) throws Exception {
-        OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
-        return http.formLogin(Customizer.withDefaults()).build();
+        //OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
+        //return http.formLogin(Customizer.withDefaults()).build();
+        final OAuth2AuthorizationServerConfigurer<HttpSecurity> auth2AuthorizationServerConfigurer = new OAuth2AuthorizationServerConfigurer<>();
+        auth2AuthorizationServerConfigurer.authorizationEndpoint(customizer -> customizer.consentPage("/oauth2/consent"));
+
+        final RequestMatcher endpointsMatcher = auth2AuthorizationServerConfigurer.getEndpointsMatcher();
+
+        http.requestMatcher(endpointsMatcher)
+                .authorizeRequests(requests -> requests.anyRequest().authenticated())
+                .csrf(csrf -> csrf.ignoringRequestMatchers(endpointsMatcher))
+                .apply(auth2AuthorizationServerConfigurer);
+
+        return http.formLogin(customizer -> customizer.loginPage("/login")).build();
     }
 
     @Bean
@@ -60,59 +73,8 @@ public class AuthorizationServerConfig {
     }
 
     @Bean
-    public RegisteredClientRepository registeredClientRepository(final PasswordEncoder passwordEncoder) {
-        final RegisteredClient backend = RegisteredClient.withId("1")
-                .clientId("algafood-backend")
-                .clientSecret(passwordEncoder.encode("backend123"))
-                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-                .scope("READ")
-                .tokenSettings(TokenSettings.builder()
-                        //.accessTokenFormat(OAuth2TokenFormat.REFERENCE) opaco
-                        .accessTokenFormat(OAuth2TokenFormat.SELF_CONTAINED) //jwt
-                        .accessTokenTimeToLive(Duration.ofMinutes(30))
-                        .build())
-                .build();
-
-        final RegisteredClient web = RegisteredClient.withId("2")
-                .clientId("algafood-web")
-                .clientSecret(passwordEncoder.encode("web123"))
-                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                .scope("READ")
-                .scope("WRITE")
-                .tokenSettings(TokenSettings.builder()
-                        //.accessTokenFormat(OAuth2TokenFormat.REFERENCE) opaco
-                        .accessTokenFormat(OAuth2TokenFormat.SELF_CONTAINED) //jwt
-                        .accessTokenTimeToLive(Duration.ofMinutes(30))
-                        .reuseRefreshTokens(false)
-                        .refreshTokenTimeToLive(Duration.ofDays(1))
-                        .build())
-                .redirectUri("http://127.0.0.1:9090/authorized")
-                .redirectUri("http://127.0.0.1:9090/swagger-ui/oauth2-redirect.html")
-                .clientSettings(ClientSettings.builder()
-                        .requireAuthorizationConsent(true).build())
-                .build();
-
-        final RegisteredClient analytics = RegisteredClient.withId("3")
-                .clientId("foodanalytics")
-                .clientSecret(passwordEncoder.encode("web123"))
-                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .scope("READ")
-                .scope("WRITE")
-                .tokenSettings(TokenSettings.builder()
-                        //.accessTokenFormat(OAuth2TokenFormat.REFERENCE) opaco
-                        .accessTokenFormat(OAuth2TokenFormat.SELF_CONTAINED) //jwt
-                        .accessTokenTimeToLive(Duration.ofMinutes(30))
-                        .build())
-                .redirectUri("http://www.foodanalytics:8082")
-                .clientSettings(ClientSettings.builder()
-                        .requireAuthorizationConsent(false).build())
-                .build();
-
-        return new InMemoryRegisteredClientRepository(Arrays.asList(backend, web, analytics));
+    public RegisteredClientRepository registeredClientRepository(final JdbcOperations jdbcOperations) {
+        return new JdbcRegisteredClientRepository(jdbcOperations);
     }
 
     @Bean
@@ -154,6 +116,11 @@ public class AuthorizationServerConfig {
                 context.getClaims().claim("authorities", authorities);
             }
         };
+    }
+
+    @Bean
+    public OAuth2AuthorizationConsentService consentService(JdbcOperations jdbcOperations, RegisteredClientRepository repository) {
+        return new JdbcOAuth2AuthorizationConsentService(jdbcOperations, repository);
     }
 
 }

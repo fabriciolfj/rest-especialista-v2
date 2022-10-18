@@ -4,6 +4,10 @@
 - O antigo spring oauth2 foi quebrado em 2 projetos:
   - spring security (aonde encontra-se o resources server)
   - spring authorization server (responsável pela geração e validação do token)
+    - precisamos de um filter SecurityFilterChain
+    - um bean provider ProviderSettings
+    - um repositório dos clients -> RegisteredClientRepository
+    - um local para persistir o token -> OAuth2AuthorizationService
   - não precisamos mais extender a classe WebSecurityConfigurerAdapter
   - toda a configuração e feita via beans
 
